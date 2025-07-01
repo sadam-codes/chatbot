@@ -1,0 +1,13 @@
+import { Table, Column, Model, DataType } from 'sequelize-typescript';
+
+@Table({ tableName: 'documents', timestamps: true })
+export class Document extends Model<Document> {
+  @Column({ autoIncrement: true, primaryKey: true })
+  declare id: number;
+
+  @Column
+  declare content: string;
+
+  @Column({ type: DataType.STRING }) 
+  declare embedding: string;
+}
