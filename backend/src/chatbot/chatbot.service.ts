@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Document } from '../model/chatbot.model';
+import { Document, Messages } from '../model/chatbot.model';
 import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
 import * as fs from 'fs';
@@ -14,7 +14,7 @@ function randomEmbedding(): number[] {
 }
 
 export const SYSTEM_PROMPT = `
-You are a helpful, concise, and intelligent assistant. Answer the user's query using ONLY the provided context (top 3 most relevant chunks).
+You are a helpful, concise, and intelligent assistant. Answer the user's query using ONLY the provided context in database.
 
 Instructions:
 - If the answer is clearly present in the context, provide it directly in a friendly and detailed manner, referencing the relevant content.
@@ -46,6 +46,8 @@ export class ChatbotService {
   constructor(
     @InjectModel(Document)
     private readonly documentModel: typeof Document,
+    @InjectModel(Messages)
+    private readonly chatModel: typeof Messages,
   ) {}
 
   async processPdf(file: Express.Multer.File) {
@@ -64,10 +66,10 @@ export class ChatbotService {
     const splitDocs = await splitter.splitDocuments(docs);
     for (const doc of splitDocs) {
       const embedding = randomEmbedding();
-      const embeddingString = `[${embedding.join(',')}]`; // <-- convert to string
+      const embeddingString = `[${embedding.join(',')}]`;
       await this.documentModel.create({
         content: doc.pageContent,
-        embedding: embeddingString, 
+        embedding: embeddingString,
       } as CreationAttributes<Document>);
     }
     fs.unlinkSync(tempPath);
@@ -77,7 +79,7 @@ export class ChatbotService {
   async chatWithRag(
     question: string,
   ): Promise<{ text: string; chunks: Document[] }> {
-    const questionEmbedding = `[${randomEmbedding().join(',')}]`; 
+    const questionEmbedding = `[${randomEmbedding().join(',')}]`;
     const docs = await this.documentModel.sequelize!.query(
       `
 SELECT *, (embedding <#> $1) AS distance
@@ -93,6 +95,10 @@ LIMIT 3
     );
 
     if (!docs.length) {
+      await this.chatModel.create({
+        question,
+        answer: "Sorry! I can't provide you the answer from out of context.",
+      } as CreationAttributes<Messages>);
       return {
         text: `Sorry! I can't provide you the answer from out of context.`,
         chunks: [],
@@ -125,6 +131,10 @@ LIMIT 3
     const answer =
       response.data.choices?.[0]?.message?.content?.trim() ||
       "Sorry! Couldn't extract a valid response.";
+    await this.chatModel.create({
+      question,
+      answer,
+    } as CreationAttributes<Messages>);
 
     return { text: answer, chunks: docs };
   }

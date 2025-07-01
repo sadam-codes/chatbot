@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { ChatbotController } from './chatbot.controller';
 import { ChatbotService } from './chatbot.service';
-import { Document } from '../model/chatbot.model';
+import { Document, Messages } from '../model/chatbot.model';
 
 @Module({
-  imports: [SequelizeModule.forFeature([Document])],
+  imports: [SequelizeModule.forFeature([Document, Messages])],
   controllers: [ChatbotController],
   providers: [ChatbotService],
 })

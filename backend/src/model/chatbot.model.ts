@@ -11,3 +11,15 @@ export class Document extends Model<Document> {
   @Column({ type: DataType.STRING }) 
   declare embedding: string;
 }
+
+@Table({ tableName: 'messages', timestamps: true })
+export class Messages extends Model<Messages> {
+  @Column({ autoIncrement: true, primaryKey: true })
+  declare id: number;
+
+  @Column
+  declare question: string;
+
+  @Column
+  declare answer: string;
+}
