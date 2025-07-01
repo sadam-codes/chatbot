@@ -48,7 +48,6 @@ export class ChatbotService {
     private readonly documentModel: typeof Document,
   ) {}
 
-  // Ingest PDF, split, embed (fake), and store
   async processPdf(file: Express.Multer.File) {
     const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
     if (!fs.existsSync(uploadsDir)) {
@@ -68,19 +67,17 @@ export class ChatbotService {
       const embeddingString = `[${embedding.join(',')}]`; // <-- convert to string
       await this.documentModel.create({
         content: doc.pageContent,
-        embedding: embeddingString, // store as string
+        embedding: embeddingString, 
       } as CreationAttributes<Document>);
     }
     fs.unlinkSync(tempPath);
     return { status: 'ok', chunks: splitDocs.length };
   }
-
+  // chat
   async chatWithRag(
     question: string,
   ): Promise<{ text: string; chunks: Document[] }> {
-    const questionEmbedding = `[${randomEmbedding().join(',')}]`; // <-- convert to string
-
-    // Find top 3 similar chunks using cosine similarity
+    const questionEmbedding = `[${randomEmbedding().join(',')}]`; 
     const docs = await this.documentModel.sequelize!.query(
       `
 SELECT *, (embedding <#> $1) AS distance
@@ -101,14 +98,8 @@ LIMIT 3
         chunks: [],
       };
     }
-
-    // Build context from the top 3 chunks
     const context = docs.map((d: Document) => d.content).join('\n\n');
-
-    // Compose the prompt for the LLM
     const prompt = `${SYSTEM_PROMPT}\n\nContext:\n${context}\n\nUser Question:\n${question}`;
-
-    // Call Groq LLM API
     const response = await axios.post(
       this.groqEndpoint,
       {
