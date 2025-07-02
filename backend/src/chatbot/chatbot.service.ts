@@ -7,10 +7,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { CreationAttributes } from 'sequelize';
 import axios from 'axios';
+import 'dotenv/config';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const EMBEDDING_SIZE = 1536;
-function randomEmbedding(): number[] {
-  return Array.from({ length: EMBEDDING_SIZE }, () => Math.random());
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+  throw new Error('GEMINI_API_KEY is missing from environment variables');
+}
+const genAI = new GoogleGenerativeAI(apiKey);
+
+async function geminiEmbedding(text: string): Promise<number[]> {
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-embedding-exp-03-07',
+  });
+  const result = await model.embedContent(text);
+  return result.embedding.values;
 }
 
 export const SYSTEM_PROMPT = `
@@ -64,48 +75,68 @@ export class ChatbotService {
       chunkSize: 1000,
     });
     const splitDocs = await splitter.splitDocuments(docs);
+
+    //    const embedding = genAI.getGenerativeModel({
+    //   model: 'gemini-embedding-exp-03-07',
+    // });
+
+    //add pgvector langchain configuration for connection to DB
+
+    // const vectorstore = initialize();
+
+    // let docIDs: array of ids = splitDocs.forEach((doc) => (
+    //   uuid()
+    // ))
+    // VectorStores.addDocuments(sp liteDocs, docIDs)
+
     for (const doc of splitDocs) {
-      const embedding = randomEmbedding();
-      const embeddingString = `[${embedding.join(',')}]`;
-      await this.documentModel.create({
-        content: doc.pageContent,
-        embedding: embeddingString,
-      } as CreationAttributes<Document>);
+      const embedding = await geminiEmbedding(doc.pageContent);
+      await this.documentModel.sequelize?.query(
+        `INSERT INTO documents (content, embedding, "createdAt", "updatedAt")
+   VALUES ($1, $2::vector, NOW(), NOW())`,
+        {
+          bind: [doc.pageContent, `[${embedding.join(',')}]`],
+        },
+      );
     }
+
     fs.unlinkSync(tempPath);
     return { status: 'ok', chunks: splitDocs.length };
   }
-  // chat
+
   async chatWithRag(
     question: string,
   ): Promise<{ text: string; chunks: Document[] }> {
-    const questionEmbedding = `[${randomEmbedding().join(',')}]`;
+    const questionEmbedding = await geminiEmbedding(question);
+
     const docs = await this.documentModel.sequelize!.query(
       `
-SELECT *, (embedding <#> $1) AS distance
-FROM documents
-ORDER BY distance ASC
-LIMIT 3
-`,
+  SELECT *, (embedding <#> $1::vector) AS distance
+  FROM documents
+  ORDER BY distance ASC
+  LIMIT 3
+  `,
       {
-        bind: [questionEmbedding],
+        bind: [`[${questionEmbedding.join(',')}]`],
         model: Document,
         mapToModel: true,
       },
     );
 
     if (!docs.length) {
+      const fallback =
+        "Sorry! I can't provide you the answer from out of context.";
       await this.chatModel.create({
         question,
-        answer: "Sorry! I can't provide you the answer from out of context.",
+        answer: fallback,
       } as CreationAttributes<Messages>);
       return {
-        text: `Sorry! I can't provide you the answer from out of context.`,
+        text: fallback,
         chunks: [],
       };
     }
+
     const context = docs.map((d: Document) => d.content).join('\n\n');
-    const prompt = `${SYSTEM_PROMPT}\n\nContext:\n${context}\n\nUser Question:\n${question}`;
     const response = await axios.post(
       this.groqEndpoint,
       {
@@ -131,6 +162,7 @@ LIMIT 3
     const answer =
       response.data.choices?.[0]?.message?.content?.trim() ||
       "Sorry! Couldn't extract a valid response.";
+
     await this.chatModel.create({
       question,
       answer,

@@ -8,8 +8,10 @@ export class Document extends Model<Document> {
   @Column
   declare content: string;
 
-  @Column({ type: DataType.STRING }) 
-  declare embedding: string;
+  @Column({
+    type: 'vector(768)' as any,
+  })
+  declare embedding: number[];
 }
 
 @Table({ tableName: 'messages', timestamps: true })
